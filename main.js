@@ -33,43 +33,50 @@ const PLUGIN_VERSION = "1.0.0";
 //
 // To make subtitle text rotate CW to match the video we apply an ASS Angle
 // override.  ASS Angle is CCW degrees, so a visual CW rotation of R° requires
-// Angle = (360 - R) % 360.
+//   Angle = (360 - R) % 360
 //
-//   video-rotate  │  Desired visual rotation  │  ASS Angle (CCW)
-//   ─────────────────────────────────────────────────────────────
-//   0°            │  0°                       │  0
-//   90°  (CW)     │  90°  CW                  │  270
-//   180°          │  180°                     │  180
-//   270° (CW)     │  270° CW                  │  90
+//   video-rotate │ ASS Angle │ Alignment anchor  │ Why
+//   ─────────────────────────────────────────────────────────────────────────
+//    0°           │  0        │ 2  bottom-center  │ default, unchanged
+//   90°  (CW)     │ 270       │ 6  middle-right   │ rotated text hangs ↑↓
+//                 │           │                   │ from right-center; never
+//                 │           │                   │ exits screen top/bottom
+//   180°          │ 180       │ 8  top-center     │ upside-down text sits at
+//                 │           │                   │ top = visual bottom
+//   270° (CW)     │  90       │ 4  middle-left    │ mirror of 90° case
 //
-// Alignment stays at 2 (bottom-center of screen) for all angles so that
-// subtitles never leave the visible area.  Changing the alignment anchor when
-// subtitles are in screen-space pushes them off the edge of the window.
+// Why per-rotation Alignment matters:
+//   With Alignment=2 (bottom-center) the ASS anchor is near the bottom edge.
+//   When we rotate the glyph 90° CW around that anchor, the right half of the
+//   text swings BELOW the anchor → off the bottom of the screen.
+//   Moving the anchor to the middle of the appropriate edge (6 / 4) means
+//   the rotated text extends equally above and below the anchor, staying
+//   within the screen height.
 
 const ROTATION_MAP = {
   0: {
     angle: 0,
-    alignment: 2,   // bottom center — default, unchanged
+    alignment: 2,   // bottom center — default, no change
     marginV: 30,
     marginH: 20,
   },
   90: {
-    angle: 270,     // 270° CCW = 90° CW — matches clockwise video rotation
-    alignment: 2,   // keep at bottom center of screen
-    marginV: 30,
-    marginH: 20,
+    angle: 270,     // 90° CW visual (270° CCW in ASS notation)
+    alignment: 6,   // middle-right anchor — rotated text balanced ↑↓ on screen
+    marginV: 20,
+    marginH: 30,
   },
   180: {
-    angle: 180,     // 180° — same CW/CCW
-    alignment: 2,
+    angle: 180,     // upside-down
+    alignment: 8,   // top-center — after 180° this is the visual bottom
     marginV: 30,
     marginH: 20,
   },
   270: {
-    angle: 90,      // 90° CCW = 270° CW — matches clockwise video rotation
-    alignment: 2,   // keep at bottom center of screen
-    marginV: 30,
-    marginH: 20,
+    angle: 90,      // 270° CW visual (90° CCW in ASS notation)
+    alignment: 4,   // middle-left anchor — mirror of 90° case
+    marginV: 20,
+    marginH: 30,
   },
 };
 
@@ -201,11 +208,11 @@ function applySubtitleRotation(rawRotation) {
   if (rotation !== 0) {
     appendStyleOverride("Default.Angle=" + cfg.angle);
 
-    // Always keep Alignment=2 (bottom-center of screen) so subtitles never
-    // leave the visible area.  Only the vertical margin is adjusted so the
-    // rotated text box stays clear of the bottom edge.
+    // Reposition the anchor to the correct screen edge for this rotation so
+    // the rotated text bounding box stays within the visible window.
     appendStyleOverride("Default.Alignment=" + cfg.alignment);
     appendStyleOverride("Default.MarginV="   + cfg.marginV);
+    appendStyleOverride("Default.MarginH="   + cfg.marginH);
   }
 
   // 4. Optional OSD notification
