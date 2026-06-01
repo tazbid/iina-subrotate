@@ -45,13 +45,22 @@ const PLUGIN_VERSION = "1.0.0";
 //                 │           │                   │ top = visual bottom
 //   270° (CW)     │  90       │ 4  middle-left    │ mirror of 90° case
 //
-// Why per-rotation Alignment matters:
-//   With Alignment=2 (bottom-center) the ASS anchor is near the bottom edge.
-//   When we rotate the glyph 90° CW around that anchor, the right half of the
-//   text swings BELOW the anchor → off the bottom of the screen.
-//   Moving the anchor to the middle of the appropriate edge (6 / 4) means
-//   the rotated text extends equally above and below the anchor, staying
-//   within the screen height.
+// Why per-rotation Alignment matters — the geometry:
+//
+//   For right-aligned text (Alignment=6/9), a character w pixels LEFT of the
+//   anchor rotates 90° CW to land w pixels BELOW the anchor.  This means the
+//   entire subtitle runs DOWNWARD from whatever anchor point is chosen.
+//
+//   Anchor at MIDDLE (Alignment=6, Y=PlayResY/2):
+//     text spans Y = PlayResY/2  …  PlayResY/2 + W
+//     → for W > PlayResY/2 (any typical long subtitle) it exits the bottom ✗
+//
+//   Anchor at TOP (Alignment=9, Y=MarginV≈30):
+//     text spans Y = 30 … 30 + W
+//     → stays within screen for any W < screen height ✓
+//
+//   Same geometry applies to left-aligned 90° CCW (270° case): text also
+//   runs downward from the anchor, so TOP-LEFT (Alignment=7) is correct.
 
 const ROTATION_MAP = {
   0: {
@@ -62,20 +71,23 @@ const ROTATION_MAP = {
   },
   90: {
     angle: 270,     // 90° CW visual (270° CCW in ASS notation)
-    alignment: 6,   // middle-right anchor — rotated text balanced ↑↓ on screen
-    marginV: 20,
+    alignment: 9,   // TOP-RIGHT anchor — 90° CW rotates right-aligned text
+                    // DOWNWARD from the anchor, so starting at the top keeps
+                    // the full text within the screen height
+    marginV: 30,
     marginH: 30,
   },
   180: {
     angle: 180,     // upside-down
-    alignment: 8,   // top-center — after 180° this is the visual bottom
+    alignment: 8,   // top-center — after 180° rotation this is the visual bottom
     marginV: 30,
     marginH: 20,
   },
   270: {
     angle: 90,      // 270° CW visual (90° CCW in ASS notation)
-    alignment: 4,   // middle-left anchor — mirror of 90° case
-    marginV: 20,
+    alignment: 7,   // TOP-LEFT anchor — mirror of 90° case; 90° CCW rotates
+                    // left-aligned text DOWNWARD from the anchor
+    marginV: 30,
     marginH: 30,
   },
 };
