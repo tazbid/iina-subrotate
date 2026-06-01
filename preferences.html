@@ -134,6 +134,24 @@
 
     <div class="row">
       <div class="row-label">
+        <div class="title">Adjust Subtitle Position</div>
+        <div class="hint">
+          Repositions subtitles to the visual bottom of the rotated video.<br>
+          Disable if subtitles jump to unexpected positions.
+        </div>
+      </div>
+      <div class="row-control">
+        <input
+          type="checkbox"
+          data-type="bool"
+          data-pref-key="adjustPosition"
+          checked
+        >
+      </div>
+    </div>
+
+    <div class="row">
+      <div class="row-label">
         <div class="title">Show OSD on Rotation Change</div>
         <div class="hint">Display a brief on-screen message when the subtitle rotation is updated.</div>
       </div>
@@ -147,6 +165,30 @@
     </div>
   </div>
 
+  <hr class="divider">
+
+  <!-- ── Advanced section ─────────────────────────────────────── -->
+  <div class="section">
+    <div class="section-title">Advanced</div>
+
+    <div class="row">
+      <div class="row-label">
+        <div class="title">ASS Override Mode</div>
+        <div class="hint">
+          <strong>Yes</strong> – recommended for most content. Preserves original ASS styling; only the Default style is rotated.<br>
+          <strong>Force</strong> – forces all subtitle text through the Default style. Use if subtitles use custom style names and rotation is not applied. Note: loses original color, size, and position overrides in complex ASS files.<br>
+          <strong>Scale</strong> – minimal override; may not apply angle changes correctly.
+        </div>
+      </div>
+      <div class="row-control">
+        <select data-pref-key="overrideMode">
+          <option value="yes">Yes (Recommended)</option>
+          <option value="force">Force</option>
+          <option value="scale">Scale</option>
+        </select>
+      </div>
+    </div>
+  </div>
 
 </body>
 </html>

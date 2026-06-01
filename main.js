@@ -1,85 +1,105 @@
 "use strict";
 
 // ─────────────────────────────────────────────────────────────────────────────
-// IINA Plugin: Subtitle Rotation  v1.0.0
+// IINA Plugin: Subtitle Rotation
+// Automatically counter-rotates subtitle text so it remains readable when
+// the video is rotated via MPV's video-rotate property.
 //
-// ROOT CAUSE (discovered through testing):
-//   IINA writes its own subtitle alignment to the MPV properties
-//   `sub-align-x` (default "center") and `sub-align-y` (default "bottom").
-//   These properties override ASS style-level Alignment, so our earlier
-//   `Default.Alignment=9` style override was silently ignored.
-//   Only `Default.Angle` (text rotation) was taking effect, leaving the
-//   subtitle centered+bottom and rotated — spanning the full video width.
+// How it works:
+//   1. Observe MPV's `video-rotate` property.
+//   2. When rotation changes, inject ASS style overrides via MPV's
+//      `sub-ass-style-overrides` list property (change-list command).
+//   3. The injected overrides set:
+//        - Default.Angle  : counter-rotation so text appears upright
+//        - Default.Alignment : repositions subtitles to the visual bottom
+//        - Default.MarginV/H : maintains a comfortable reading margin
 //
-// FIX:
-//   1. Directly set `sub-align-x`, `sub-align-y`, `sub-pos` to move the
-//      subtitle anchor to the correct edge (right for 90°, left for 270°).
-//   2. Set `Default.Angle` via ASS style override to rotate the text.
-//   3. Set `Default.WrapStyle=2` (no auto line-wrap) so the subtitle stays
-//      as one column instead of fanning out across the screen.
-//   4. Save the user's original alignment settings on first file load and
-//      restore them when rotation returns to 0°.
-//
-// Per-rotation positioning:
-//
-//   video-rotate │ sub-align-x │ sub-align-y │ sub-pos │ ASS Angle
-//   ─────────────────────────────────────────────────────────────────
-//    0°           │ (restored)  │ (restored)  │ (saved) │  0
-//   90°  (CW)     │ right       │ top         │  0      │ 270
-//   180°          │ center      │ top         │  0      │ 180
-//   270° (CW)     │ left        │ top         │  0      │  90
-//
-//   For 90° CW: anchor = top-right. 90° CW-rotated right-aligned text runs
-//               DOWNWARD from the anchor → stays within screen height.
-//   For 270°:   mirror on the left side.
-//   sub-pos=0 keeps the anchor near the top edge so downward-running text
-//   has maximum room before hitting the screen bottom.
+// Subtitle rendering pipeline:
+//   MPV feeds raw subtitle data → libass renders to video frame →
+//   `video-rotate` rotates the entire output frame (video + subs).
+//   By pre-rotating the text in libass coordinates, the two rotations cancel
+//   out and the viewer sees horizontal, readable subtitles.
 // ─────────────────────────────────────────────────────────────────────────────
 
 const LOG_PREFIX = "[SubtitleRotation]";
 const PLUGIN_VERSION = "1.0.0";
 
-// ── Per-rotation config ───────────────────────────────────────────────────────
+// ── Rotation Map ─────────────────────────────────────────────────────────────
+//
+// In this MPV/IINA rendering path, `video-rotate` is a display-only transform:
+// the video frame is rotated CW on-screen, but the subtitle overlay is
+// composited AFTER that transform, so subtitles live in screen-space and are
+// not affected by video-rotate.
+//
+// To make subtitle text rotate CW to match the video we apply an ASS Angle
+// override.  ASS Angle is CCW degrees, so a visual CW rotation of R° requires
+//   Angle = (360 - R) % 360
+//
+//   video-rotate │ ASS Angle │ Alignment anchor  │ Why
+//   ─────────────────────────────────────────────────────────────────────────
+//    0°           │  0        │ 2  bottom-center  │ default, unchanged
+//   90°  (CW)     │ 270       │ 6  middle-right   │ rotated text hangs ↑↓
+//                 │           │                   │ from right-center; never
+//                 │           │                   │ exits screen top/bottom
+//   180°          │ 180       │ 8  top-center     │ upside-down text sits at
+//                 │           │                   │ top = visual bottom
+//   270° (CW)     │  90       │ 4  middle-left    │ mirror of 90° case
+//
+// Why per-rotation Alignment matters — the geometry:
+//
+//   For right-aligned text (Alignment=6/9), a character w pixels LEFT of the
+//   anchor rotates 90° CW to land w pixels BELOW the anchor.  This means the
+//   entire subtitle runs DOWNWARD from whatever anchor point is chosen.
+//
+//   Anchor at MIDDLE (Alignment=6, Y=PlayResY/2):
+//     text spans Y = PlayResY/2  …  PlayResY/2 + W
+//     → for W > PlayResY/2 (any typical long subtitle) it exits the bottom ✗
+//
+//   Anchor at TOP (Alignment=9, Y=MarginV≈30):
+//     text spans Y = 30 … 30 + W
+//     → stays within screen for any W < screen height ✓
+//
+//   Same geometry applies to left-aligned 90° CCW (270° case): text also
+//   runs downward from the anchor, so TOP-LEFT (Alignment=7) is correct.
 
 const ROTATION_MAP = {
   0: {
-    // Use saved originals — restored in applySubtitleRotation
-    alignX: null,
-    alignY: null,
-    subPos: null,
     angle: 0,
+    alignment: 2,   // bottom center — default, no change
+    marginV: 30,
+    marginH: 20,
   },
   90: {
-    alignX: "right",
-    alignY: "top",
-    subPos: 0,       // anchor at very top → text column runs down within screen
-    angle: 270,      // 270° CCW = 90° CW visual
+    angle: 270,     // 90° CW visual (270° CCW in ASS notation)
+    alignment: 9,   // TOP-RIGHT anchor — 90° CW rotates right-aligned text
+                    // DOWNWARD from the anchor, so starting at the top keeps
+                    // the full text within the screen height
+    marginV: 30,
+    marginH: 30,
   },
   180: {
-    alignX: "center",
-    alignY: "top",
-    subPos: 0,
-    angle: 180,
+    angle: 180,     // upside-down
+    alignment: 8,   // top-center — after 180° rotation this is the visual bottom
+    marginV: 30,
+    marginH: 20,
   },
   270: {
-    alignX: "left",
-    alignY: "top",
-    subPos: 0,
-    angle: 90,       // 90° CCW = 270° CW visual
+    angle: 90,      // 270° CW visual (90° CCW in ASS notation)
+    alignment: 7,   // TOP-LEFT anchor — mirror of 90° case; 90° CCW rotates
+                    // left-aligned text DOWNWARD from the anchor
+    marginV: 30,
+    marginH: 30,
   },
 };
 
 // ── Plugin State ──────────────────────────────────────────────────────────────
 
 const state = {
-  currentRotation: -1,
+  currentRotation: -1,  // -1 = uninitialized; avoids redundant reapplication
   enabled: true,
+  adjustPosition: true,
   showOSD: false,
-  // Saved user/IINA subtitle alignment settings (captured on first file load)
-  savedAlignX: "center",
-  savedAlignY: "bottom",
-  savedSubPos: 100,
-  defaultsCaptured: false,
+  overrideMode: "yes",  // sub-ass-override value: "yes" | "force" | "scale"
 };
 
 // ── Logging ───────────────────────────────────────────────────────────────────
@@ -97,9 +117,14 @@ function logError(msg) {
 function loadPreferences() {
   try {
     const p = iina.preferences;
-    state.enabled  = p.get("enabled")  !== undefined ? p.get("enabled")  : true;
-    state.showOSD  = p.get("showOSD")  !== undefined ? p.get("showOSD")  : false;
-    log("Preferences: enabled=" + state.enabled + " showOSD=" + state.showOSD);
+    state.enabled        = p.get("enabled")        !== undefined ? p.get("enabled")        : true;
+    state.adjustPosition = p.get("adjustPosition") !== undefined ? p.get("adjustPosition") : true;
+    state.showOSD        = p.get("showOSD")        !== undefined ? p.get("showOSD")        : false;
+    state.overrideMode   = p.get("overrideMode")   !== undefined ? p.get("overrideMode")   : "yes";
+    log("Preferences: enabled=" + state.enabled
+        + " adjustPosition=" + state.adjustPosition
+        + " showOSD=" + state.showOSD
+        + " overrideMode=" + state.overrideMode);
   } catch (e) {
     log("Could not load preferences, using defaults (" + e.message + ")");
   }
@@ -112,7 +137,7 @@ function mpvCommand(name, argsArray) {
     iina.mpv.command(name, argsArray);
     return true;
   } catch (e) {
-    logError("mpv.command('" + name + "') failed: " + e.message);
+    logError("mpv.command('" + name + "', " + JSON.stringify(argsArray) + ") failed: " + e.message);
     return false;
   }
 }
@@ -128,118 +153,99 @@ function mpvSet(property, value) {
 }
 
 function mpvGetNumber(property) {
-  try { return iina.mpv.getNumber(property); } catch (e) { return null; }
-}
-
-function mpvGetString(property) {
-  try { return iina.mpv.getString(property); } catch (e) { return null; }
+  try {
+    return iina.mpv.getNumber(property);
+  } catch (e) {
+    return null;
+  }
 }
 
 // ── Style Override Helpers ────────────────────────────────────────────────────
 
+// Clears every entry from sub-ass-style-overrides.
+// Falls back to directly setting the property to an empty string if the
+// change-list command is unavailable (older MPV builds).
 function clearStyleOverrides() {
   const ok = mpvCommand("change-list", ["sub-ass-style-overrides", "clr", ""]);
   if (!ok) {
     mpvSet("sub-ass-style-overrides", "");
-    mpvSet("sub-ass-force-style", "");
+    mpvSet("sub-ass-force-style", "");  // legacy fallback
   }
 }
 
+// Appends one "StyleName.Property=Value" entry to sub-ass-style-overrides.
 function appendStyleOverride(entry) {
   const ok = mpvCommand("change-list", ["sub-ass-style-overrides", "append", entry]);
   if (!ok) {
+    // Legacy fallback: sub-ass-force-style accepts comma-separated entries
     try {
       const current = iina.mpv.getString("sub-ass-force-style") || "";
-      mpvSet("sub-ass-force-style", current ? current + "," + entry : entry);
+      const updated = current ? current + "," + entry : entry;
+      mpvSet("sub-ass-force-style", updated);
     } catch (e) {
-      logError("Legacy override failed for: " + entry);
+      logError("Legacy override also failed for: " + entry);
     }
   }
 }
 
-// ── Save / Restore IINA's subtitle position defaults ─────────────────────────
-
-// Called once when the first file loads (or on first rotation change).
-// Captures IINA's current sub-align-x / sub-align-y / sub-pos so we can
-// restore them when rotation returns to 0°.
-function captureDefaults() {
-  if (state.defaultsCaptured) return;
-  state.savedAlignX = mpvGetString("sub-align-x") || "center";
-  state.savedAlignY = mpvGetString("sub-align-y") || "bottom";
-  state.savedSubPos = mpvGetNumber("sub-pos");
-  if (state.savedSubPos === null) state.savedSubPos = 100;
-  state.defaultsCaptured = true;
-  log("Captured defaults: sub-align-x=" + state.savedAlignX
-      + " sub-align-y=" + state.savedAlignY
-      + " sub-pos=" + state.savedSubPos);
-}
-
-function restoreDefaults() {
-  mpvSet("sub-align-x", state.savedAlignX);
-  mpvSet("sub-align-y", state.savedAlignY);
-  mpvSet("sub-pos",     state.savedSubPos);
-  mpvSet("sub-ass-override", "yes");
-  clearStyleOverrides();
-  log("Restored defaults");
-}
-
 // ── Core Rotation Logic ───────────────────────────────────────────────────────
 
+/**
+ * Reads the current video-rotate value and applies matching subtitle overrides.
+ * Safe to call repeatedly; skips work when rotation has not changed.
+ */
 function applySubtitleRotation(rawRotation) {
   if (!state.enabled) {
-    log("Plugin disabled — skipping");
+    log("Plugin disabled, skipping rotation adjustment");
     return;
   }
 
   const rotation = ((Math.round(rawRotation || 0) % 360) + 360) % 360;
-  if (rotation === state.currentRotation) return;
 
-  // Capture IINA's defaults before we touch anything (only once per session)
-  captureDefaults();
-
-  log("Rotation: " + state.currentRotation + "° → " + rotation + "°");
-
-  // ── 0°: restore everything to what IINA had before ────────────────────────
-  if (rotation === 0) {
-    restoreDefaults();
-    state.currentRotation = 0;
-    return;
+  if (rotation === state.currentRotation) {
+    return; // nothing changed
   }
 
-  const cfg = ROTATION_MAP[rotation] || ROTATION_MAP[90];
+  const cfg = ROTATION_MAP[rotation] || ROTATION_MAP[0];
+  log("Rotation change: " + state.currentRotation + "° → " + rotation + "°"
+      + "  (ASS angle=" + cfg.angle + "°, alignment=" + cfg.alignment + ")");
 
-  // ── Step 1: Move the subtitle anchor via MPV's own alignment properties ───
-  // These override IINA's "Align X / Align Y" settings and take precedence
-  // over ASS style-level Alignment, so the anchor reliably lands where we need.
-  mpvSet("sub-align-x", cfg.alignX);
-  mpvSet("sub-align-y", cfg.alignY);
-  mpvSet("sub-pos",     cfg.subPos);
+  // 1. Allow ASS style overrides to take effect
+  mpvSet("sub-ass-override", state.overrideMode);
 
-  // ── Step 2: Allow ASS overrides and inject them ───────────────────────────
-  mpvSet("sub-ass-override", "force");
+  // 2. Wipe previous overrides injected by this plugin
   clearStyleOverrides();
 
-  // Rotate the glyph bitmaps to match the video's CW rotation
-  appendStyleOverride("Default.Angle=" + cfg.angle);
+  // 3. Inject new overrides when rotation is non-zero
+  if (rotation !== 0) {
+    appendStyleOverride("Default.Angle=" + cfg.angle);
 
-  // Disable automatic line-wrapping so the subtitle stays as a single column
-  // instead of wrapping into multiple columns that fan across the screen.
-  // Explicit line-breaks (\N in ASS / blank lines in SRT) still apply.
-  appendStyleOverride("Default.WrapStyle=2");
+    // Reposition the anchor to the correct screen edge for this rotation so
+    // the rotated text bounding box stays within the visible window.
+    appendStyleOverride("Default.Alignment=" + cfg.alignment);
+    appendStyleOverride("Default.MarginV="   + cfg.marginV);
+    appendStyleOverride("Default.MarginH="   + cfg.marginH);
+  }
 
-  // ── Step 3: Optional OSD ──────────────────────────────────────────────────
+  // 4. Optional OSD notification
   if (state.showOSD) {
-    try { iina.osd.message("Subtitle rotation: " + rotation + "\xB0"); } catch (e) {}
+    try {
+      const label = rotation === 0 ? "off" : rotation + "\xB0";  // °
+      iina.osd.message("Subtitle rotation: " + label);
+    } catch (e) {
+      // OSD permission not granted; ignore
+    }
   }
 
   state.currentRotation = rotation;
 }
 
+/** Wipes all overrides and restores neutral state. Called on file close. */
 function resetSubtitleOverrides() {
-  log("File ended — resetting subtitle state");
-  restoreDefaults();
+  log("Resetting subtitle overrides to defaults");
+  clearStyleOverrides();
+  mpvSet("sub-ass-override", "yes");
   state.currentRotation = -1;
-  state.defaultsCaptured = false;  // re-capture on next file (different IINA settings may apply)
 }
 
 // ── Event Handlers ────────────────────────────────────────────────────────────
@@ -251,6 +257,7 @@ function onFileLoaded() {
 }
 
 function onRotationChanged() {
+  // IINA fires the event with no arguments; we must poll the property.
   const rotation = mpvGetNumber("video-rotate") || 0;
   applySubtitleRotation(rotation);
 }
@@ -261,47 +268,70 @@ function init() {
   log("Subtitle Rotation Plugin v" + PLUGIN_VERSION + " initializing");
   loadPreferences();
 
+  // ── Property observation ──────────────────────────────────────────────────
   try {
     iina.mpv.observe("video-rotate");
-    log("Observing: video-rotate");
+    log("Observing MPV property: video-rotate");
   } catch (e) {
     logError("Failed to observe video-rotate: " + e.message);
   }
 
-  // Primary event (iina-plugin-definition API)
-  try {
-    iina.event.on("mpv.video-rotate.changed", onRotationChanged);
-    log("Registered: mpv.video-rotate.changed");
-  } catch (e) {
-    logError("Could not register mpv.video-rotate.changed: " + e.message);
-  }
+  // ── Register event listeners ──────────────────────────────────────────────
+  //
+  // IINA Plugin API event names (verified against iina-plugin-definition):
+  //
+  //   iina.file-loaded           : playback file has loaded
+  //   iina.file-started          : playback started (after loaded)
+  //   mpv.{property-name}.changed: observed MPV property changed value
+  //
+  // The property-change callback receives NO arguments — current value must
+  // be fetched via mpv.getNumber() / mpv.getString() etc.
 
-  // Fallback — catch-all property change (older IINA builds)
-  try {
-    iina.event.on("iina.mpv-property-change", function(name, value) {
-      if (name === "video-rotate") applySubtitleRotation(value);
-    });
-  } catch (e) { /* silent */ }
-
-  // Fallback — per-property format (some IINA builds)
-  try {
-    iina.event.on("iina.mpv-property-change.video-rotate", function(value) {
-      applySubtitleRotation(value);
-    });
-  } catch (e) { /* silent */ }
-
-  // File lifecycle
+  // File loaded
   try {
     iina.event.on("iina.file-loaded", onFileLoaded);
-    log("Registered: iina.file-loaded");
+    log("Registered event: iina.file-loaded");
   } catch (e) {
     logError("Could not register iina.file-loaded: " + e.message);
   }
 
+  // Rotation property change — primary handler
+  try {
+    iina.event.on("mpv.video-rotate.changed", onRotationChanged);
+    log("Registered event: mpv.video-rotate.changed");
+  } catch (e) {
+    logError("Could not register mpv.video-rotate.changed: " + e.message);
+  }
+
+  // ── Fallback event names (different IINA versions use different formats) ──
+
+  // Catch-all property change (older IINA builds)
+  try {
+    iina.event.on("iina.mpv-property-change", function(name, value) {
+      if (name === "video-rotate") applySubtitleRotation(value);
+    });
+  } catch (e) {
+    // Not available in this IINA version; primary handler covers it
+  }
+
+  // Per-property dot notation (some IINA builds)
+  try {
+    iina.event.on("iina.mpv-property-change.video-rotate", function(value) {
+      applySubtitleRotation(value);
+    });
+  } catch (e) {
+    // Silently skip
+  }
+
+  // End-of-file / file closed — reset so we don't pollute the next file
   try {
     iina.event.on("iina.file-ended", resetSubtitleOverrides);
   } catch (e) {
-    try { iina.event.on("mpv.end-file.changed", resetSubtitleOverrides); } catch (e2) {}
+    try {
+      iina.event.on("mpv.end-file.changed", resetSubtitleOverrides);
+    } catch (e2) {
+      // Best-effort; overrides naturally clear on next file-loaded
+    }
   }
 
   log("Plugin initialization complete");
