@@ -1,0 +1,194 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Subtitle Rotation Preferences</title>
+  <style>
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Helvetica Neue", sans-serif;
+      font-size: 13px;
+      color: #1d1d1f;
+      background: transparent;
+      padding: 16px 20px;
+    }
+
+    /* Dark mode */
+    @media (prefers-color-scheme: dark) {
+      body { color: #f5f5f7; }
+      .section-title { color: #a1a1a6; }
+      .divider { border-color: #3a3a3c; }
+      .hint { color: #8e8e93; }
+      select {
+        background: #2c2c2e;
+        color: #f5f5f7;
+        border-color: #48484a;
+      }
+    }
+
+    .section {
+      margin-bottom: 20px;
+    }
+
+    .section-title {
+      font-size: 11px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      color: #6e6e73;
+      margin-bottom: 10px;
+    }
+
+    .row {
+      display: flex;
+      align-items: flex-start;
+      padding: 7px 0;
+      gap: 12px;
+    }
+
+    .row + .row {
+      border-top: 1px solid rgba(0,0,0,0.08);
+    }
+
+    @media (prefers-color-scheme: dark) {
+      .row + .row { border-color: rgba(255,255,255,0.08); }
+    }
+
+    .row-label {
+      flex: 1;
+    }
+
+    .row-label .title {
+      font-weight: 500;
+      line-height: 1.4;
+    }
+
+    .hint {
+      font-size: 11px;
+      color: #6e6e73;
+      margin-top: 2px;
+      line-height: 1.4;
+    }
+
+    .row-control {
+      flex-shrink: 0;
+      display: flex;
+      align-items: center;
+    }
+
+    /* Checkbox toggle */
+    input[type="checkbox"] {
+      width: 16px;
+      height: 16px;
+      cursor: pointer;
+    }
+
+    /* Select */
+    select {
+      font-size: 12px;
+      padding: 3px 6px;
+      border: 1px solid #c7c7cc;
+      border-radius: 5px;
+      background: #fff;
+      cursor: pointer;
+      appearance: auto;
+    }
+
+    .divider {
+      border: none;
+      border-top: 1px solid rgba(0,0,0,0.12);
+      margin: 12px 0;
+    }
+
+    @media (prefers-color-scheme: dark) {
+      .divider { border-color: rgba(255,255,255,0.12); }
+    }
+  </style>
+</head>
+<body>
+
+  <!-- ── General section ──────────────────────────────────────── -->
+  <div class="section">
+    <div class="section-title">General</div>
+
+    <div class="row">
+      <div class="row-label">
+        <div class="title">Enable Subtitle Rotation</div>
+        <div class="hint">Automatically rotate subtitle text to match the video rotation angle.</div>
+      </div>
+      <div class="row-control">
+        <input
+          type="checkbox"
+          data-type="bool"
+          data-pref-key="enabled"
+          checked
+        >
+      </div>
+    </div>
+
+    <div class="row">
+      <div class="row-label">
+        <div class="title">Adjust Subtitle Position</div>
+        <div class="hint">
+          Repositions subtitles to the visual bottom of the rotated video.<br>
+          Disable if subtitles jump to unexpected positions.
+        </div>
+      </div>
+      <div class="row-control">
+        <input
+          type="checkbox"
+          data-type="bool"
+          data-pref-key="adjustPosition"
+          checked
+        >
+      </div>
+    </div>
+
+    <div class="row">
+      <div class="row-label">
+        <div class="title">Show OSD on Rotation Change</div>
+        <div class="hint">Display a brief on-screen message when the subtitle rotation is updated.</div>
+      </div>
+      <div class="row-control">
+        <input
+          type="checkbox"
+          data-type="bool"
+          data-pref-key="showOSD"
+        >
+      </div>
+    </div>
+  </div>
+
+  <hr class="divider">
+
+  <!-- ── Advanced section ─────────────────────────────────────── -->
+  <div class="section">
+    <div class="section-title">Advanced</div>
+
+    <div class="row">
+      <div class="row-label">
+        <div class="title">ASS Override Mode</div>
+        <div class="hint">
+          <strong>Yes</strong> – recommended for most content. Preserves original ASS styling; only the Default style is rotated.<br>
+          <strong>Force</strong> – forces all subtitle text through the Default style. Use if subtitles use custom style names and rotation is not applied. Note: loses original color, size, and position overrides in complex ASS files.<br>
+          <strong>Scale</strong> – minimal override; may not apply angle changes correctly.
+        </div>
+      </div>
+      <div class="row-control">
+        <select data-pref-key="overrideMode">
+          <option value="yes">Yes (Recommended)</option>
+          <option value="force">Force</option>
+          <option value="scale">Scale</option>
+        </select>
+      </div>
+    </div>
+  </div>
+
+</body>
+</html>

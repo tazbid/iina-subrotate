@@ -1,0 +1,22 @@
+{
+  "name": "Subtitle Rotation",
+  "identifier": "io.github.iina-plugin-subtitle-rotation",
+  "version": "1.0.0",
+  "minimumRequiredIINAVersion": "1.3.0",
+  "entry": "main.js",
+  "description": "Automatically rotates subtitles to match the video's current rotation angle. Supports SRT, ASS/SSA, embedded, and external subtitles at 90°, 180°, and 270°.",
+  "author": {
+    "name": "iina-plugin-subtitle-rotation",
+    "email": "",
+    "url": "https://github.com/iina-plugin-subtitle-rotation"
+  },
+  "homepage": "https://github.com/iina-plugin-subtitle-rotation/iina-plugin-subtitle-rotation",
+  "permissions": ["show-osd"],
+  "preferencesPage": "preferences.html",
+  "preferenceDefaults": {
+    "enabled": true,
+    "adjustPosition": true,
+    "showOSD": false,
+    "overrideMode": "yes"
+  }
+}

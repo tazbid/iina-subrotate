@@ -1,0 +1,33 @@
+{
+  "name": "iina-plugin-subtitle-rotation",
+  "version": "1.0.0",
+  "description": "IINA plugin that automatically rotates subtitles to match the video rotation angle",
+  "main": "main.js",
+  "scripts": {
+    "lint": "eslint main.js",
+    "pack": "zip -r iina-plugin-subtitle-rotation.iinaplugin Info.json main.js preferences.html"
+  },
+  "keywords": [
+    "iina",
+    "iina-plugin",
+    "subtitle",
+    "rotation",
+    "mpv",
+    "macos"
+  ],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/iina-plugin-subtitle-rotation/iina-plugin-subtitle-rotation.git"
+  },
+  "bugs": {
+    "url": "https://github.com/iina-plugin-subtitle-rotation/iina-plugin-subtitle-rotation/issues"
+  },
+  "homepage": "https://github.com/iina-plugin-subtitle-rotation/iina-plugin-subtitle-rotation#readme",
+  "devDependencies": {
+    "eslint": "^8.0.0"
+  },
+  "engines": {
+    "node": ">=14.0.0"
+  }
+}
