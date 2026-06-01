@@ -26,46 +26,50 @@ const PLUGIN_VERSION = "1.0.0";
 
 // ── Rotation Map ─────────────────────────────────────────────────────────────
 //
-// ASS coordinate system:
-//   • Alignment uses numpad notation: 7=top-left … 2=bottom-center … 3=bottom-right
-//   • Angle is counter-clockwise degrees
+// In this MPV/IINA rendering path, `video-rotate` is a display-only transform:
+// the video frame is rotated CW on-screen, but the subtitle overlay is
+// composited AFTER that transform, so subtitles live in screen-space and are
+// not affected by video-rotate.
 //
-// When video-rotate = R°  (clockwise), libass text rendered in the video frame
-// is also rotated R° CW on-screen.  To cancel this, we set Angle = R° (CCW in
-// ASS notation equals CW in screen space when the video itself is rotated CW).
+// To make subtitle text rotate CW to match the video we apply an ASS Angle
+// override.  ASS Angle is CCW degrees, so a visual CW rotation of R° requires
+// Angle = (360 - R) % 360.
 //
-// Position mapping (where subtitles should live in the original video frame
-// so that after R° CW rotation they end up at the bottom of the screen):
+//   video-rotate  │  Desired visual rotation  │  ASS Angle (CCW)
+//   ─────────────────────────────────────────────────────────────
+//   0°            │  0°                       │  0
+//   90°  (CW)     │  90°  CW                  │  270
+//   180°          │  180°                     │  180
+//   270° (CW)     │  270° CW                  │  90
 //
-//   0°   → bottom-center  (alignment 2) — unchanged
-//   90°  → middle-right   (alignment 6) → after 90° CW becomes bottom-center
-//   180° → top-center     (alignment 8) → after 180° becomes bottom-center
-//   270° → middle-left    (alignment 4) → after 270° CW becomes bottom-center
+// Alignment stays at 2 (bottom-center of screen) for all angles so that
+// subtitles never leave the visible area.  Changing the alignment anchor when
+// subtitles are in screen-space pushes them off the edge of the window.
 
 const ROTATION_MAP = {
   0: {
     angle: 0,
-    alignment: 2,   // bottom center
+    alignment: 2,   // bottom center — default, unchanged
     marginV: 30,
     marginH: 20,
   },
   90: {
-    angle: 90,      // CCW in ASS = CW in output; cancels video's 90° CW
-    alignment: 6,   // middle right in video frame
-    marginV: 20,
-    marginH: 30,
+    angle: 270,     // 270° CCW = 90° CW — matches clockwise video rotation
+    alignment: 2,   // keep at bottom center of screen
+    marginV: 30,
+    marginH: 20,
   },
   180: {
-    angle: 180,
-    alignment: 8,   // top center in video frame
+    angle: 180,     // 180° — same CW/CCW
+    alignment: 2,
     marginV: 30,
     marginH: 20,
   },
   270: {
-    angle: 270,
-    alignment: 4,   // middle left in video frame
-    marginV: 20,
-    marginH: 30,
+    angle: 90,      // 90° CCW = 270° CW — matches clockwise video rotation
+    alignment: 2,   // keep at bottom center of screen
+    marginV: 30,
+    marginH: 20,
   },
 };
 
@@ -197,11 +201,11 @@ function applySubtitleRotation(rawRotation) {
   if (rotation !== 0) {
     appendStyleOverride("Default.Angle=" + cfg.angle);
 
-    if (state.adjustPosition) {
-      appendStyleOverride("Default.Alignment=" + cfg.alignment);
-      appendStyleOverride("Default.MarginV="   + cfg.marginV);
-      appendStyleOverride("Default.MarginH="   + cfg.marginH);
-    }
+    // Always keep Alignment=2 (bottom-center of screen) so subtitles never
+    // leave the visible area.  Only the vertical margin is adjusted so the
+    // rotated text box stays clear of the bottom edge.
+    appendStyleOverride("Default.Alignment=" + cfg.alignment);
+    appendStyleOverride("Default.MarginV="   + cfg.marginV);
   }
 
   // 4. Optional OSD notification
